@@ -33,6 +33,7 @@ library(readr)
 library(tidyverse)
 library(metafor)
 library(brms)
+library(rstan)
 
 MA_d <- read_delim("Ass3_MetaAnalysisData.tsv", delim ="\t")
 View(MA_d)
