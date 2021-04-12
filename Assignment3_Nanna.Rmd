@@ -10,7 +10,8 @@ knitr::opts_chunk$set(echo = TRUE)
 pacman::p_load(tidyverse,
                readr,
                metafor,
-               brms)
+               brms,
+               rethinking)
 ```
 
 ## Assignment 3
@@ -52,7 +53,7 @@ summary(MA_d$PitchVariabilityASD_Mean)
 #only containing rows where we actually have a paper
 MA_d <- MA_d %>% subset(!is.na(Paper))
 
-#Takes dataset(MA_d), want to know what kind of effect size (standardized mean difference), nunber og participant in each group (TD_N and ASD_N), Mean of the variable we are calculating for each group (PitchVariability), and SD for both groups, slab is for plotting? 
+#Takes dataset(MA_d), want to know what kind of effect size (standardized mean difference), number of participant in each group (TD_N and ASD_N), Mean of the variable we are calculating for each group (PitchVariability), and SD for both groups, slab is for plotting? 
 #adds cols - yi = effect size - vi = variance of the effect size
 MA_d <- escalc(measure = "SMD", 
                n1i = TD_N,
@@ -72,7 +73,7 @@ MA_d <- MA_d %>%
 summary(MA_d$EffectSize)
 summary(MA_d$StandardError) #should always be positive
 
-# Making a Meta analytic formula - bayesian - whet the effect size with a given certainty with an intercept and the varying effect is by paper - Ricc changes the effect to population because some of the studies used the same population - we might also add language
+# Making a Meta analytic formula - bayesian - with the effect size with a given certainty with an intercept and the varying effect is by paper - Ricc changes the effect to population because some of the studies used the same population - we might also add language
 MA_f <- bf(EffectSize | se(StandardError) ~ 1 + (1 | Population)) 
 
 #identify the priors 
@@ -83,6 +84,7 @@ MA_prior <- c(
   prior(normal(0,1), class = Intercept),
   prior(normal(0,.3 ), class = sd) 
 )
+
 
 #define the model - 
 MA_m0 <- brm(
@@ -133,15 +135,46 @@ Step 2: Analyse pitch variability in ASD in two new studies for which you have a
 - Also, let's standardize the data, so that they are compatible with our meta-analytic prior (Cohen's d is measured in SDs).
 - Is there any structure in the dataset that we should account for with random/varying effects? How would you implement that? Or, if you don't know how to do bayesian random/varying effects or don't want to bother, is there anything we would need to simplify in the dataset?
 
+?Random effects = Language, Gender 
+Random intercept = ID
+Its too difficult to find justifications for random effects so we only choose to include random intercept.
+
+```{r}
+d <- read.csv("Ass3_data.csv")
+
+#Adjusting variables
+d <- d %>% 
+  mutate_if(is.character, as.factor) %>% 
+  select(ID, Language, Diagnosis, Gender, Age, starts_with("Pitch"))
+
+#standardizing
+d <- d %>%
+  mutate(
+    Pitch_IQR_stan = standardize(Pitch_IQR)
+  )
+
+```
+
+
 Step 3: Build a regression model predicting Pitch variability from Diagnosis.
 - how is the outcome distributed? (likelihood function). NB. given we are standardizing, and the meta-analysis is on that scale, gaussian is not a bad assumption, but check t-student as well. Lognormal would require us to convert the prior to that scale.
 - how are the parameters of the likelihood distribution distributed? Which predictors should they be conditioned on? Start simple, with Diagnosis only. Add other predictors only if you have the time and energy!
 - use a skeptical/conservative prior for the effects of diagnosis. Remember you'll need to motivate it, test its predictions (prior predictive checks), its impact on the posteriors (prior posterior updates checks).
 - Evaluate model quality. Describe and plot the estimates. 
 
+```{r}
+
+```
+
+
 Step 4: Now re-run the model with the meta-analytic prior
 - Evaluate model quality. Describe and plot the estimates. 
 - N.B. you need to assess the meta-analytic informed prior (prior pred checks, prior-posterior update checks) and if relevant you can always change it in motivated ways (e.g. too confident, doesn't let the model actually learn from the data, so increase sd)
+
+```{r}
+
+```
+
 
 Step 5: Compare the models
 - Plot priors and posteriors of the diagnosis effect in both models
@@ -149,7 +182,17 @@ Step 5: Compare the models
 - Compare the two models (LOO)
 - Discuss how they compare and whether any of them is best.
 
+```{r}
+
+```
+
+
 Step 6: Prepare a nice write up of the analysis and answer the questions at the top.
+
+```{r}
+
+```
+
 
 Optional step 7: how skeptical should a prior be?
 - Try different levels of skepticism and compare them both plotting the impact on the inferred effect size and using LOO.
