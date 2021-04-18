@@ -1,0 +1,352 @@
+---
+title: "Assignment 3 - Applying meta-analytic priors"
+author: "Riccardo Fusaroli"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Assignment 3
+
+In this assignment we do the following:
+- we run a Bayesian meta-analysis of pitch variability in ASD,based on previously published literature
+- we analyze pitch variability in ASD in two new studies using both a conservative and a meta-analytic prior
+- we assess the difference in model quality and estimates using the two priors. 
+
+The questions you need to answer are: What are the consequences of using a meta-analytic prior? Evaluate the models with conservative and meta-analytic priors. Discuss the effects on estimates. Discuss the effects on model quality. Discuss the role that meta-analytic priors should have in scientific practice. Should we systematically use them? Do they have drawbacks? Should we use them to complement more conservative approaches? How does the use of meta-analytic priors you suggest reflect the skeptical and cumulative nature of science?
+
+### Step by step suggestions
+
+Step 1: Perform a meta-analysis of pitch variability from previous studies of voice in ASD
+- N.B. all you need is in the two intro videos
+- the data is available as Ass3_MetaAnalysisData.tsv
+- You should calculate Effect size (cohen's d) and Standard Error (uncertainty in the Cohen's d) per each study, using escalc() from the metafor package (also check the livecoding intro)
+- N.B. for the purpose of the assignment we're only interested in getting a meta-analytic effect size for the meta-analytic prior (and not e.g. all the stuff on publication bias). See a brms tutorial here: https://vuorre.netlify.com/post/2016/09/29/meta-analysis-is-a-special-case-of-bayesian-multilevel-modeling/ The formula is EffectSize | se(StandardError) ~ 1 + (1 | Paper). Don't forget prior definition, model checking, etc.
+- N.B. the livecoding video is not perfect, you *can* (but don't have to) improve it: use a t-student likelihood, test the effects of the priors and refine them, check the robustness of results to more or less skeptical priors, etc. 
+- Write down the results of the meta-analysis in terms of a prior for step 2.
+
+```{r step 1}
+# Importing meta-analysis
+pacman::p_load(readr, 
+               tidyverse,
+               metafor,
+               brms, 
+               rethinking, 
+               viridis, 
+               bayesplot)
+
+MA_d <- read_delim("Ass3_MetaAnalysisData.tsv", delim ="\t")
+View(MA_d)
+
+
+MA_d <- MA_d %>% 
+  mutate(
+    PitchVariabilityASD_Mean = as.numeric(PitchVariabilityASD_Mean),
+    PitchVariabilityTD_Mean = as.numeric(PitchVariabilityTD_Mean),
+    PitchVariabilityASD_SD = as.numeric(PitchVariabilityASD_SD),
+    PitchVariabilityTD_SD = as.numeric(PitchVariabilityTD_SD)
+  )
+  
+
+# Calculating effect sizes
+
+MA_d <- MA_d %>% subset(!is.na(Paper))
+  
+
+MA_d <- escalc(measure = "SMD", #standardized mean difference
+               n1i = TD_N,
+               n2i = ASD_N,
+               m1i = PitchVariabilityTD_Mean,
+               m2i = PitchVariabilityASD_Mean,
+               sd1i = PitchVariabilityTD_SD,
+               sd2i = PitchVariabilityASD_SD,
+               data = MA_d,
+               slab = Paper)  
+
+colnames(MA_d) # Now also containing yi (effect size) and vi (variance)
+
+MA_d <- MA_d %>% 
+  mutate(
+    StandardError = sqrt(vi)) %>%
+  rename(EffectSize = yi)
+      
+# Making the formula
+MA_f <- bf(EffectSize | se(StandardError) ~ 1 + (1 | Population))  
+
+# Get priors
+
+get_prior(MA_f, data = MA_d, family = gaussian())
+
+MA_prior <- c(
+  prior(normal(0,1), class = Intercept),#sceptical prior
+  prior(normal(0,.3 ), class = sd) 
+)
+  
+sd(MA_d$EffectSize, na.rm = T)
+
+# Define the model
+
+MA_m0 <- brm(
+  MA_f,
+  data = MA_d,
+  family = gaussian(),
+  prior = MA_prior,
+  sample_prior = "only",
+  chains = 2,
+  cores = 2
+)
+
+
+pp_check(MA_m0, nsamples = 100)
+
+
+MA_m1 <- brm(
+  MA_f,
+  data = MA_d,
+  family = gaussian(),
+  prior = MA_prior,
+  sample_prior = T,
+  chains = 2,
+  cores = 2
+)
+
+pp_check(MA_m1, nsamples = 100)
+
+summary(MA_m1)
+
+# MA effect mean = -0.43, sd = 0.1
+MA_mean <- fixef(MA_m1)[[1]]
+MA_SE <- fixef(MA_m1)[[2]]
+
+# Group level effects
+# Average error that the population level estimates
+MA_heterogeneity = 0.32
+```
+
+
+Step 2: Analyse pitch variability in ASD in two new studies for which you have access to all the trials (not just study level estimates)
+- the data is available as Ass3_data.csv. Notice there are 2 studies (language us, and language dk), multiple trials per participant, and a few different ways to measure pitch variability (if in doubt, focus on pitch IQR, interquartile range of the log of fundamental frequency)
+- Also, let's standardize the data, so that they are compatible with our meta-analytic prior (Cohen's d is measured in SDs).
+- Is there any structure in the dataset that we should account for with random/varying effects? How would you implement that? Or, if you don't know how to do bayesian random/varying effects or don't want to bother, is there anything we would need to simplify in the dataset?
+
+```{r step 2}
+#Loading data 
+df <- read_csv("Ass3_data.csv")
+    
+#Cleaning dataframe
+df <- df %>% mutate_if(is.character, as.factor) %>% mutate(Age = as.factor(Age)) %>% 
+  select(ID, Language, Diagnosis, Gender, Age, starts_with("Pitch"))
+
+#Standardizing pitch variable
+df$Pitch_IQR <- standardize(df$Pitch_IQR)
+
+#Standardizing all numeric values
+df <- df %>% mutate_if(is.numeric, standardize)
+
+#Exploring pitch_IQR, seems like it is distributed as students_t with a long tail 
+hist(df$Pitch_IQR)
+```
+
+Step 3: Build a regression model predicting Pitch variability from Diagnosis.
+- how is the outcome distributed? (likelihood function). NB. given we are standardizing, and the meta-analysis is on that scale, gaussian is not a bad assumption, but check t-student as well. Lognormal would require us to convert the prior to that scale.
+- how are the parameters of the likelihood distribution distributed? Which predictors should they be conditioned on? Start simple, with Diagnosis only. Add other predictors only if you have the time and energy!
+## LIKELIHOOD DISTRIBUTION
+- use a skeptical/conservative prior for the effects of diagnosis. Remember you'll need to motivate it, test its predictions (prior predictive checks), its impact on the posteriors (prior posterior updates checks).
+- Evaluate model quality. Describe and plot the estimates.
+
+```{r step 3}
+#Building model 1 (do we need to add language??????)
+f1 <- bf(Pitch_IQR ~ 1 + Diagnosis + (1|ID))
+
+#Getting priors 
+get_prior(f1, data = df)
+
+#Setting priors  ##SHOULD IT BE MORE SCEPTICAL??
+f1_prior <- c(
+  prior(normal(0,1), class = Intercept), #Mean of 0 and sd of 1 (we have standardized the data)
+  prior(normal(1,.5), class = sd), #Mean of 1 sd of .5 (why did we do that????)
+  prior(normal(0,0.2), class = b, coef = DiagnosisTD) #Effect size of cohens d .2 (normal effect size)
+)
+
+#Model 1 only with sample prior 
+m1_prior <- brm(
+  f1,
+  data = df,
+  family = gaussian(),
+  prior = f1_prior,
+  sample_prior = "only",
+  backend = "cmdstanr",
+  chains = 2,
+  cores = 2
+)
+
+#Checking 
+pp_check(m1_prior, nsamples = 100)
+
+#Better pp_check (Does this make sense to include????)
+y_pred <- posterior_linpred(m1_prior)
+dens(y_pred)
+
+#Model 1 with data 
+m1 <- brm(
+  f1,
+  data = df,
+  family = gaussian(),
+  prior = f1_prior,
+  sample_prior = TRUE,
+  backend = "cmdstanr"
+)
+
+### Model quality check 
+
+#Summary
+summary(m1)
+
+#Checking 
+pp_check(m1, nsamples = 100)
+
+#Better pp_check (Does this make sense to include????)
+y_pred1 <- posterior_linpred(m1)
+dens(y_pred1)
+
+#Checking the chains 
+color_scheme_set("viridis")
+mcmc_trace(m1,  pars = "b_Intercept", "b_DiagnosisTD") + theme_classic()
+mcmc_rank_overlay(m1, pars = "b_Intercept", "b_DiagnosisTD") + theme_classic() #Both looks fine
+
+#Plot of (?????)
+mcmc_plot(m1)
+
+#Hypothesis testing
+hypothesis(m1, "DiagnosisTD < 0")
+
+#Posterior update check
+plot(hypothesis(m1, "DiagnosisTD < 0"))
+
+```
+ 
+
+Step 4: Now re-run the model with the meta-analytic prior
+- Evaluate model quality. Describe and plot the estimates. 
+- N.B. you need to assess the meta-analytic informed prior (prior pred checks, prior-posterior update checks) and if relevant you can always change it in motivated ways (e.g. too confident, doesn't let the model actually learn from the data, so increase sd)
+
+```{r}
+# MA effect mean = -0.43, sd = 0.1
+MA_mean <- fixef(MA_m1)[[1]]
+MA_SE <- fixef(MA_m1)[[2]]
+
+# Group level effects
+# Average error that the population level estimates
+MA_heterogeneity = 0.32
+
+#Setting model 
+f2 <- bf(Pitch_IQR ~ 1 + Diagnosis + (1|ID))
+
+#Getting priors
+get_prior(f2, data = df)
+
+#Setting the meta analytic priors 
+f2_prior <- c(
+  prior(normal(0,1), class = Intercept), #Still standardized data
+  prior(normal(1,.32), class = sd), #adding the population effects (IS THIS RIGHT????)
+  prior(normal(-0.43,0.1), class = b, coef = DiagnosisTD) # putting the MA prior here
+)
+
+#Running model prior only
+m2_prior <- brm(
+  f2,
+  data = df,
+  family = gaussian(),
+  prior = f2_prior,
+  sample_prior = "only",
+  backend = "cmdstanr",
+)
+
+#Checking prior
+pp_check(m2_prior, nsamples = 100)
+
+#Better check
+y_pred2 <- posterior_linpred(m2_prior)
+dens(y_pred2)
+
+#Running model on data
+m2 <- brm(
+  f2,
+  data = df,
+  family = gaussian(),
+  prior = f2_prior,
+  sample_prior = TRUE,
+  backend = "cmdstanr",
+)
+
+### Model quality check
+summary(m2)
+
+#Checking prior
+pp_check(m2, nsamples = 100)
+
+#Better check
+y_pred3 <- posterior_linpred(m2)
+dens(y_pred3)
+
+#Checking chains
+color_scheme_set("viridis")
+mcmc_trace(m2,  pars = "b_Intercept", "b_DiagnosisTD") + theme_classic()
+mcmc_rank_overlay(m2, pars = "b_Intercept", "b_DiagnosisTD") + theme_classic()
+
+#(WHAT DOES THIS PLOT SHOW??)
+mcmc_plot(m2)
+
+#Hypothesis checking
+hypothesis(m2, "DiagnosisTD > 0")
+
+#Posterior update check
+plot(hypothesis(m2, "DiagnosisTD > 0"))
+```
+
+Step 5: Compare the models
+- Plot priors and posteriors of the diagnosis effect in both models
+- Compare posteriors between the two models
+- Compare the two models (LOO)
+- Discuss how they compare and whether any of them is best.
+
+```{r step 5}
+#WTF THIS DOESNT WORK ANYMORE 
+#Comparing the models with waic
+m1 <- add_criterion(m1, "waic")
+m2 <- add_criterion(m2, "waic")
+
+w_waic <- loo_compare(m1, m2, criterion = "waic")
+
+print(w, simplify = F)
+
+###DOES THIS DO ANYTHING SARAH???
+#cbind(waic_diff = w[, 1] * -2,
+      #se        = w[, 2] *  2)
+
+#Comparing with loo
+m1 <- add_criterion(m1, "loo", moment_match = TRUE)
+m2 <- add_criterion(m2, "loo", moment_match = TRUE)
+
+w_loo <- loo_compare(m2, m4, criterion = "loo")
+
+
+loo_model_weights(m2,m4)
+
+pp_average(m2, m4)
+```
+
+
+Step 6: Prepare a nice write up of the analysis and answer the questions at the top.
+
+Optional step 7: how skeptical should a prior be?
+- Try different levels of skepticism and compare them both plotting the impact on the inferred effect size and using LOO.
+
+Optional step 8: Include other predictors
+- Do age, gender and education improve the model?
+- Should they be main effects or interactions?
+
+Optional step 9: generalized linear models
+- If you wanted to preserve the lognormal distribution of the pitch variability, what would 
