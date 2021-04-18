@@ -6,12 +6,18 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+
+pacman::p_load(tidyverse,
+               readr,
+               metafor,
+               brms,
+               rethinking)
 ```
 
 ## Assignment 3
 
 In this assignment we do the following:
-- we run a Bayesian meta-analysis of pitch variability in ASD,based on previously published literature
+- we run a Bayesian meta-analysis of pitch variability in ASD, based on previously published literature
 - we analyze pitch variability in ASD in two new studies using both a conservative and a meta-analytic prior
 - we assess the difference in model quality and estimates using the two priors. 
 
@@ -28,17 +34,10 @@ Step 1: Perform a meta-analysis of pitch variability from previous studies of vo
 - Write down the results of the meta-analysis in terms of a prior for step 2.
 
 ```{r}
-# Importing meta-analysis
-library(readr)
-library(tidyverse)
-library(metafor)
-library(brms)
-library(rstan)
-
+#loading tsv meta analysis
 MA_d <- read_delim("Ass3_MetaAnalysisData.tsv", delim ="\t")
-View(MA_d)
 
-
+#Adjusting variables
 MA_d <- MA_d %>% 
   mutate(
     PitchVariabilityASD_Mean = as.numeric(PitchVariabilityASD_Mean),
@@ -46,14 +45,17 @@ MA_d <- MA_d %>%
     PitchVariabilityASD_SD = as.numeric(PitchVariabilityASD_SD),
     PitchVariabilityTD_SD = as.numeric(PitchVariabilityTD_SD)
   )
-  
+#Double checking the variable - pichvar is recognized as a number - the scale of these are not the same, but its okay because we ar gonna calculate the effect size within each study (using a standadized cohens D means we can compare across studies)
+summary(MA_d$PitchVariabilityASD_Mean)
 
-# Calculating effect sizes
+#calculating effect sizes using escal
 
+#only containing rows where we actually have a paper
 MA_d <- MA_d %>% subset(!is.na(Paper))
-  
 
-MA_d <- escalc(measure = "SMD", #standardized mean difference
+#Takes dataset(MA_d), want to know what kind of effect size (standardized mean difference), number of participant in each group (TD_N and ASD_N), Mean of the variable we are calculating for each group (PitchVariability), and SD for both groups, slab is for plotting? 
+#adds cols - yi = effect size - vi = variance of the effect size
+MA_d <- escalc(measure = "SMD", 
                n1i = TD_N,
                n2i = ASD_N,
                m1i = PitchVariabilityTD_Mean,
@@ -61,44 +63,45 @@ MA_d <- escalc(measure = "SMD", #standardized mean difference
                sd1i = PitchVariabilityTD_SD,
                sd2i = PitchVariabilityASD_SD,
                data = MA_d,
-               slab = Paper)  
-
-colnames(MA_d) # Now also containing yi (effect size) and vi (variance)
-
+               slab = Paper)
+#calculating a sd of our measure of uncertainty and hetrogenerity combined with how few participants there are - sqrt(vi)
 MA_d <- MA_d %>% 
   mutate(
     StandardError = sqrt(vi)) %>%
   rename(EffectSize = yi)
-      
-# Making the formula
-MA_f <- bf(EffectSize | se(StandardError) ~ 1 + (1 | Population))  
+#
+summary(MA_d$EffectSize)
+summary(MA_d$StandardError) #should always be positive
 
-# Get priors
+# Making a Meta analytic formula - bayesian - with the effect size with a given certainty with an intercept and the varying effect is by paper - Ricc changes the effect to population because some of the studies used the same population - we might also add language
+MA_f <- bf(EffectSize | se(StandardError) ~ 1 + (1 | Population)) 
 
-get_prior(MA_f, data = MA_d, family = gaussian())
+#identify the priors 
+get_prior(MA_f, data =MA_d, family = gaussian())
 
+#define prior for the meta analytical effect size - first we are skeptical so the data can pursuade us
 MA_prior <- c(
-  prior(normal(0,1), class = Intercept),#sceptical prior
+  prior(normal(0,1), class = Intercept),
   prior(normal(0,.3 ), class = sd) 
 )
-  
-sd(MA_d$EffectSize, na.rm = T)
 
-# Define the model
 
+#define the model - 
 MA_m0 <- brm(
   MA_f,
   data = MA_d,
   family = gaussian(),
   prior = MA_prior,
-  sample_prior = "only",
+  sample_prior = "only", #don't look at the data yet
   chains = 2,
   cores = 2
 )
 
 
 pp_check(MA_m0, nsamples = 100)
+#Ricc say this is acceptable - could be shrunk a bit by making the intercept (0,5) instead 
 
+#running the full model
 
 MA_m1 <- brm(
   MA_f,
@@ -111,8 +114,10 @@ MA_m1 <- brm(
 )
 
 pp_check(MA_m1, nsamples = 100)
+#Ricc says it decent - looks like there a bimadal we are not capturing because we are mot considering age/language ect. 
 
 summary(MA_m1)
+#We are interested in population level effects
 
 # MA effect mean = -0.43, sd = 0.1
 MA_mean <- fixef(MA_m1)[[1]]
@@ -121,6 +126,7 @@ MA_SE <- fixef(MA_m1)[[2]]
 # Group level effects
 # Average error that the population level estimates
 MA_heterogeneity = 0.32
+
 ```
 
 
@@ -129,15 +135,46 @@ Step 2: Analyse pitch variability in ASD in two new studies for which you have a
 - Also, let's standardize the data, so that they are compatible with our meta-analytic prior (Cohen's d is measured in SDs).
 - Is there any structure in the dataset that we should account for with random/varying effects? How would you implement that? Or, if you don't know how to do bayesian random/varying effects or don't want to bother, is there anything we would need to simplify in the dataset?
 
+?Random effects = Language, Gender 
+Random intercept = ID
+Its too difficult to find justifications for random effects so we only choose to include random intercept.
+
+```{r}
+d <- read.csv("Ass3_data.csv")
+
+#Adjusting variables
+d <- d %>% 
+  mutate_if(is.character, as.factor) %>% 
+  select(ID, Language, Diagnosis, Gender, Age, starts_with("Pitch"))
+
+#standardizing
+d <- d %>%
+  mutate(
+    Pitch_IQR_stan = standardize(Pitch_IQR)
+  )
+
+```
+
+
 Step 3: Build a regression model predicting Pitch variability from Diagnosis.
 - how is the outcome distributed? (likelihood function). NB. given we are standardizing, and the meta-analysis is on that scale, gaussian is not a bad assumption, but check t-student as well. Lognormal would require us to convert the prior to that scale.
 - how are the parameters of the likelihood distribution distributed? Which predictors should they be conditioned on? Start simple, with Diagnosis only. Add other predictors only if you have the time and energy!
 - use a skeptical/conservative prior for the effects of diagnosis. Remember you'll need to motivate it, test its predictions (prior predictive checks), its impact on the posteriors (prior posterior updates checks).
 - Evaluate model quality. Describe and plot the estimates. 
 
+```{r}
+
+```
+
+
 Step 4: Now re-run the model with the meta-analytic prior
 - Evaluate model quality. Describe and plot the estimates. 
 - N.B. you need to assess the meta-analytic informed prior (prior pred checks, prior-posterior update checks) and if relevant you can always change it in motivated ways (e.g. too confident, doesn't let the model actually learn from the data, so increase sd)
+
+```{r}
+
+```
+
 
 Step 5: Compare the models
 - Plot priors and posteriors of the diagnosis effect in both models
@@ -145,7 +182,17 @@ Step 5: Compare the models
 - Compare the two models (LOO)
 - Discuss how they compare and whether any of them is best.
 
+```{r}
+
+```
+
+
 Step 6: Prepare a nice write up of the analysis and answer the questions at the top.
+
+```{r}
+
+```
+
 
 Optional step 7: how skeptical should a prior be?
 - Try different levels of skepticism and compare them both plotting the impact on the inferred effect size and using LOO.
