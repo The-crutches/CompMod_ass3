@@ -11,7 +11,8 @@ pacman::p_load(tidyverse,
                readr,
                metafor,
                brms,
-               rethinking)
+               rethinking,
+               bayesplot)
 ```
 
 ## Assignment 3
@@ -53,7 +54,7 @@ summary(MA_d$PitchVariabilityASD_Mean)
 #only containing rows where we actually have a paper
 MA_d <- MA_d %>% subset(!is.na(Paper))
 
-#Takes dataset(MA_d), want to know what kind of effect size (standardized mean difference), number of participant in each group (TD_N and ASD_N), Mean of the variable we are calculating for each group (PitchVariability), and SD for both groups, slab is for plotting? 
+#Takes dataset(MA_d), want to know what kind of effect size (standardized mean difference - cohens d), number of participant in each group (TD_N and ASD_N), Mean of the variable we are calculating for each group (PitchVariability), and SD for both groups, slab is for plotting? 
 #adds cols - yi = effect size - vi = variance of the effect size
 MA_d <- escalc(measure = "SMD", 
                n1i = TD_N,
@@ -140,20 +141,23 @@ Random intercept = ID
 Its too difficult to find justifications for random effects so we only choose to include random intercept.
 
 ```{r}
-d <- read.csv("Ass3_data.csv")
+df <- read.csv("Ass3_data.csv")
 
 #Adjusting variables
-d <- d %>% 
+df <- df %>% 
   mutate_if(is.character, as.factor) %>% 
   select(ID, Language, Diagnosis, Gender, Age, starts_with("Pitch"))
 
 #standardizing
-d <- d %>%
+df <- df %>%
   mutate(
     Pitch_IQR_stan = standardize(Pitch_IQR)
   )
 
+
 ```
+
+
 
 
 Step 3: Build a regression model predicting Pitch variability from Diagnosis.
@@ -163,6 +167,60 @@ Step 3: Build a regression model predicting Pitch variability from Diagnosis.
 - Evaluate model quality. Describe and plot the estimates. 
 
 ```{r}
+f1 <- bf(Pitch_IQR ~ 1 + Diagnosis + (1|ID))
+
+hist(df$Pitch_IQR)
+
+get_prior(f1, data = df)
+
+f1_prior <- c(
+  prior(normal(0,1), class = Intercept),
+  prior(normal(1,.5), class = sd),
+  prior(normal(0,0.2), class = b, coef = DiagnosisTD)
+)
+
+
+m1 <- brm(
+  f1,
+  data = df,
+  family = gaussian(),
+  prior = f1_prior,
+  sample_prior = "only",
+  backend = "cmdstanr",
+  chains = 2,
+  cores = 2
+)
+
+#m1 <- 
+ # update(m1,
+  #       prior = c(prior(normal(0,1), class = Intercept),
+   #               prior(normal(0, .3 ), class = sigma),
+    #              prior(normal(0, .2), class = b, coef = DiagnosisTD)))
+
+
+pp_check(m1, nsamples = 100)
+
+
+m2 <- brm(
+  f1,
+  data = df,
+  family = gaussian(),
+  prior = f1_prior,
+  sample_prior = TRUE,
+  backend = "cmdstanr",
+  chains = 2,
+  cores = 2
+)
+
+pp_check(m2, nsamples = 100)
+
+stanplot(m2)
+
+hypothesis(m2, "Intercept > DiagnosisTD")
+
+#pairs.panels(df)
+
+```
 
 ```
 
@@ -172,7 +230,93 @@ Step 4: Now re-run the model with the meta-analytic prior
 - N.B. you need to assess the meta-analytic informed prior (prior pred checks, prior-posterior update checks) and if relevant you can always change it in motivated ways (e.g. too confident, doesn't let the model actually learn from the data, so increase sd)
 
 ```{r}
+# MA effect mean = -0.43, sd = 0.1
+MA_mean <- fixef(MA_m1)[[1]]
+MA_SE <- fixef(MA_m1)[[2]]
 
+# Group level effects
+# Average error that the population level estimates
+MA_heterogeneity = 0.32
+
+f2 <- bf(Pitch_IQR ~ 1 + Diagnosis + (1|ID))
+
+get_prior(f2, data = df)
+
+f2_prior <- c(
+  prior(normal(0,1), class = Intercept),
+  prior(normal(1,.32), class = sd), #Group level effects
+  prior(normal(-0.43,0.1), class = b, coef = DiagnosisTD) # putting the MA prior here
+)
+
+
+m3 <- brm(
+  f2,
+  data = df,
+  family = gaussian(),
+  prior = f2_prior,
+  sample_prior = "only",
+  backend = "cmdstanr",
+  chains = 2,
+  cores = 2
+)
+
+
+pp_check(m3, nsamples = 100)
+
+
+m4 <- brm(
+  f2,
+  data = df,
+  family = gaussian(),
+  prior = f2_prior,
+  sample_prior = TRUE,
+  backend = "cmdstanr",
+  chains = 2,
+  cores = 2
+)
+
+pp_check(m4, nsamples = 100)
+
+stanplot(m4)
+
+hypothesis(m4, "DiagnosisTD > 0")
+
+summary(m4)
+
+mcmc_trace(m4,  pars = "b_Intercept", "b_DiagnosisTD") + theme_classic()
+
+mcmc_rank_overlay(m4, pars = "b_Intercept", "b_DiagnosisTD") + theme_classic()
+
+
+# The posteriors have moved or gotten more confident than the priors
+plot(hypothesis(m4,"DiagnosisTD > 0"))
+
+
+posterior <- posterior_samples(m4)
+ggplot(posterior) +
+  theme_classic() +
+  geom_density(aes(prior_Intercept), fill="red", alpha=0.3) +
+  geom_density(aes(b_Intercept), fill="blue", alpha=0.5)
+
+
+#comparing the models
+m2 <- add_criterion(m2, "waic")
+m4 <- add_criterion(m4, "waic")
+
+w <- loo_compare(m2, m4, criterion = "waic")
+
+print(w, simplify = F)
+
+cbind(waic_diff = w[, 1] * -2,
+      se        = w[, 2] *  2)
+
+#-------------
+
+m2 <- add_criterion(m2, "loo", moment_match = TRUE)
+m4 <- add_criterion(m4, "loo", moment_match = TRUE)
+
+w <- loo_compare(m2, m4, criterion = "loo")
+w
 ```
 
 
@@ -182,17 +326,7 @@ Step 5: Compare the models
 - Compare the two models (LOO)
 - Discuss how they compare and whether any of them is best.
 
-```{r}
-
-```
-
-
 Step 6: Prepare a nice write up of the analysis and answer the questions at the top.
-
-```{r}
-
-```
-
 
 Optional step 7: how skeptical should a prior be?
 - Try different levels of skepticism and compare them both plotting the impact on the inferred effect size and using LOO.

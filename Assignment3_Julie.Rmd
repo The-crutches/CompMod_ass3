@@ -26,6 +26,8 @@ Step 1: Perform a meta-analysis of pitch variability from previous studies of vo
 - N.B. for the purpose of the assignment we're only interested in getting a meta-analytic effect size for the meta-analytic prior (and not e.g. all the stuff on publication bias). See a brms tutorial here: https://vuorre.netlify.com/post/2016/09/29/meta-analysis-is-a-special-case-of-bayesian-multilevel-modeling/ The formula is EffectSize | se(StandardError) ~ 1 + (1 | Paper). Don't forget prior definition, model checking, etc.
 - N.B. the livecoding video is not perfect, you *can* (but don't have to) improve it: use a t-student likelihood, test the effects of the priors and refine them, check the robustness of results to more or less skeptical priors, etc. 
 - Write down the results of the meta-analysis in terms of a prior for step 2.
+`
+
 
 ```{r}
 # Importing meta-analysis
@@ -34,9 +36,14 @@ library(tidyverse)
 library(metafor)
 library(brms)
 library(rstan)
+library(cmdstanr)
+
+d <- read_csv("Ass3_data.csv")
 
 MA_d <- read_delim("Ass3_MetaAnalysisData.tsv", delim ="\t")
 View(MA_d)
+
+
 
 
 MA_d <- MA_d %>% 
@@ -92,8 +99,9 @@ MA_m0 <- brm(
   family = gaussian(),
   prior = MA_prior,
   sample_prior = "only",
-  chains = 2,
-  cores = 2
+  backend = "cmdstanr", #??
+  threads = threading(2) #???
+  
 )
 
 
