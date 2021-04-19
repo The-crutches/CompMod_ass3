@@ -37,6 +37,7 @@ pacman::p_load(readr,
                viridis, 
                bayesplot)
 
+
 MA_d <- read_delim("Ass3_MetaAnalysisData.tsv", delim ="\t")
 View(MA_d)
 
@@ -95,7 +96,9 @@ MA_m0 <- brm(
   prior = MA_prior,
   sample_prior = "only",
   chains = 2,
-  cores = 2
+  cores = 2, 
+  file = "MA_m0", 
+  file_refit = "on_change"
 )
 
 
@@ -109,7 +112,9 @@ MA_m1 <- brm(
   prior = MA_prior,
   sample_prior = T,
   chains = 2,
-  cores = 2
+  cores = 2,
+  file = "MA_m1", 
+  file_refit = "on_change"
 )
 
 pp_check(MA_m1, nsamples = 100)
@@ -152,22 +157,22 @@ hist(df$Pitch_IQR)
 Step 3: Build a regression model predicting Pitch variability from Diagnosis.
 - how is the outcome distributed? (likelihood function). NB. given we are standardizing, and the meta-analysis is on that scale, gaussian is not a bad assumption, but check t-student as well. Lognormal would require us to convert the prior to that scale.
 - how are the parameters of the likelihood distribution distributed? Which predictors should they be conditioned on? Start simple, with Diagnosis only. Add other predictors only if you have the time and energy!
-## LIKELIHOOD DISTRIBUTION
 - use a skeptical/conservative prior for the effects of diagnosis. Remember you'll need to motivate it, test its predictions (prior predictive checks), its impact on the posteriors (prior posterior updates checks).
 - Evaluate model quality. Describe and plot the estimates.
 
 ```{r step 3}
-#Building model 1 (do we need to add language??????)
+#Building model 1
 f1 <- bf(Pitch_IQR ~ 1 + Diagnosis + (1|ID))
 
 #Getting priors 
 get_prior(f1, data = df)
 
-#Setting priors  ##SHOULD IT BE MORE SCEPTICAL??
+#Setting priors 
 f1_prior <- c(
-  prior(normal(0,1), class = Intercept), #Mean of 0 and sd of 1 (we have standardized the data)
-  prior(normal(1,.5), class = sd), #Mean of 1 sd of .5 (why did we do that????)
-  prior(normal(0,0.2), class = b, coef = DiagnosisTD) #Effect size of cohens d .2 (normal effect size)
+  prior(normal(0,.5), class = Intercept), #Mean of 0 and sd of .5 (working in effect sizes)
+  prior(normal(0,.5), class = sd), #Mean of 0 and sd of .5
+  prior(normal(0,0.2), class = b, coef = DiagnosisTD), #Effect size of cohens d .2 (normal effect size)
+  prior(normal(.5, .2), class = sigma) 
 )
 
 #Model 1 only with sample prior 
@@ -177,15 +182,17 @@ m1_prior <- brm(
   family = gaussian(),
   prior = f1_prior,
   sample_prior = "only",
-  backend = "cmdstanr",
-  chains = 2,
-  cores = 2
+  chains = 4, 
+  cores = 4, 
+  seed = 12, 
+  file = "m1_prior", 
+  file_refit = "on_change"
 )
 
 #Checking 
 pp_check(m1_prior, nsamples = 100)
 
-#Better pp_check (Does this make sense to include????)
+#Better pp_check  
 y_pred <- posterior_linpred(m1_prior)
 dens(y_pred)
 
@@ -196,7 +203,11 @@ m1 <- brm(
   family = gaussian(),
   prior = f1_prior,
   sample_prior = TRUE,
-  backend = "cmdstanr"
+  chains = 4, 
+  cores = 4, 
+  seed = 12, 
+  file = "m1", 
+  file_refit = "on_change"
 )
 
 ### Model quality check 
@@ -207,7 +218,7 @@ summary(m1)
 #Checking 
 pp_check(m1, nsamples = 100)
 
-#Better pp_check (Does this make sense to include????)
+#Better pp_check 
 y_pred1 <- posterior_linpred(m1)
 dens(y_pred1)
 
@@ -216,7 +227,7 @@ color_scheme_set("viridis")
 mcmc_trace(m1,  pars = "b_Intercept", "b_DiagnosisTD") + theme_classic()
 mcmc_rank_overlay(m1, pars = "b_Intercept", "b_DiagnosisTD") + theme_classic() #Both looks fine
 
-#Plot of (?????)
+#Plot of estimates
 mcmc_plot(m1)
 
 #Hypothesis testing
@@ -249,9 +260,10 @@ get_prior(f2, data = df)
 
 #Setting the meta analytic priors 
 f2_prior <- c(
-  prior(normal(0,1), class = Intercept), #Still standardized data
-  prior(normal(1,.32), class = sd), #adding the population effects (IS THIS RIGHT????)
-  prior(normal(-0.43,0.1), class = b, coef = DiagnosisTD) # putting the MA prior here
+  prior(normal(0,.5), class = Intercept),
+  prior(normal(0,.5), class = sd), #adding the population effects
+  prior(normal(-0.43,0.1), class = b, coef = DiagnosisTD), # putting the MA prior here
+  prior(normal(.32, 0.1), class = sigma) #Population effects here 
 )
 
 #Running model prior only
@@ -261,7 +273,11 @@ m2_prior <- brm(
   family = gaussian(),
   prior = f2_prior,
   sample_prior = "only",
-  backend = "cmdstanr",
+  chains = 4, 
+  cores = 4, 
+  seed = 12, 
+  file = "m2_prior", 
+  file_refit = "on_change"
 )
 
 #Checking prior
@@ -278,7 +294,11 @@ m2 <- brm(
   family = gaussian(),
   prior = f2_prior,
   sample_prior = TRUE,
-  backend = "cmdstanr",
+  chains = 4, 
+  cores = 4, 
+  seed = 12, 
+  file = "m2", 
+  file_refit = "on_change"
 )
 
 ### Model quality check
@@ -296,7 +316,7 @@ color_scheme_set("viridis")
 mcmc_trace(m2,  pars = "b_Intercept", "b_DiagnosisTD") + theme_classic()
 mcmc_rank_overlay(m2, pars = "b_Intercept", "b_DiagnosisTD") + theme_classic()
 
-#(WHAT DOES THIS PLOT SHOW??)
+#Plot of estimates 
 mcmc_plot(m2)
 
 #Hypothesis checking
@@ -313,29 +333,19 @@ Step 5: Compare the models
 - Discuss how they compare and whether any of them is best.
 
 ```{r step 5}
-#WTF THIS DOESNT WORK ANYMORE 
-#Comparing the models with waic
-m1 <- add_criterion(m1, "waic")
-m2 <- add_criterion(m2, "waic")
-
-w_waic <- loo_compare(m1, m2, criterion = "waic")
-
-print(w, simplify = F)
-
-###DOES THIS DO ANYTHING SARAH???
-#cbind(waic_diff = w[, 1] * -2,
-      #se        = w[, 2] *  2)
-
 #Comparing with loo
 m1 <- add_criterion(m1, "loo", moment_match = TRUE)
 m2 <- add_criterion(m2, "loo", moment_match = TRUE)
 
-w_loo <- loo_compare(m2, m4, criterion = "loo")
+w_loo <- loo_compare(m1, m2, criterion = "loo")
 
+w_loo
+  #Model 2 seems like the best
 
-loo_model_weights(m2,m4)
-
-pp_average(m2, m4)
+#Loo weights 
+loo_model_weights(m1,m2)
+    #Some insecurities about the models 
+pp_average(m1, m2)
 ```
 
 
