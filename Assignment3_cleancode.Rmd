@@ -348,5 +348,75 @@ loo_model_weights(m1,m2)
 pp_average(m1, m2)
 ```
 
+```{r}
+#Exploring students t 
 
+#Running model prior only
+m3_prior <- brm(
+  f2,
+  data = df,
+  family = student(),
+  prior = f2_prior,
+  sample_prior = "only",
+  chains = 4, 
+  cores = 4, 
+  seed = 12, 
+  file = "m3_prior", 
+  file_refit = "on_change"
+)
+
+#Checking prior
+pp_check(m3_prior, nsamples = 100)
+
+#Better check
+y_pred4 <- posterior_linpred(m3_prior)
+dens(y_pred4)
+
+#Running model on data
+m3 <- brm(
+  f2,
+  data = df,
+  family = student(),
+  prior = f2_prior,
+  sample_prior = TRUE,
+  chains = 4, 
+  cores = 4, 
+  seed = 12, 
+  file = "m3", 
+  file_refit = "on_change"
+)
+
+#
+summary(m3)
+pp_check(m3, nsamples = 100)
+
+#Checking chains
+color_scheme_set("viridis")
+mcmc_trace(m3,  pars = "b_Intercept", "b_DiagnosisTD") + theme_classic()
+mcmc_rank_overlay(m3, pars = "b_Intercept", "b_DiagnosisTD") + theme_classic()
+
+#Hypothesis checking
+hypothesis(m3, "DiagnosisTD < 0")
+
+#Posterior update check
+plot(hypothesis(m3, "DiagnosisTD < 0"))
+
+```
+
+```{r}
+#Comparing with loo
+m1 <- add_criterion(m1, "loo", moment_match = TRUE)
+m2 <- add_criterion(m2, "loo", moment_match = TRUE)
+m3 <- add_criterion(m3, "loo", moment_match = TRUE)
+
+w_loo <- loo_compare(m1, m2, m3, criterion = "loo")
+
+w_loo
+  #Model 2 seems like the best
+
+#Loo weights 
+loo_model_weights(m1,m2, m3)
+    #Some insecurities about the models 
+pp_average(m1, m2, m3)
+```
 Step 6: Prepare a nice write up of the analysis and answer the questions at the top.
