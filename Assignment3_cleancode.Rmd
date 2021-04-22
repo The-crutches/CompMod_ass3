@@ -258,13 +258,21 @@ f2 <- bf(Pitch_IQR ~ 1 + Diagnosis + (1|ID))
 #Getting priors
 get_prior(f2, data = df)
 
-#Setting the meta analytic priors 
+#Setting the meta analytic priors #During the lecture we realized that we set the priors wrong - we have the priors for sd in sigma and the other way around. 
 f2_prior <- c(
   prior(normal(0,.5), class = Intercept),
   prior(normal(0,.5), class = sd), 
   prior(normal(-0.43,0.1), class = b, coef = DiagnosisTD), # putting the MA prior here
   prior(normal(.32, 0.1), class = sigma) #Population effects here 
 )
+
+## The correct priors we should have used (added after the lecture 22-04)
+#f2_prior <- c(
+#  prior(normal(0,.5), class = Intercept),
+#  prior(normal(.32,.2), class = sd),#between study heterogeneity we broadened the SD from 0.1 tol 0.2 to include between partcipant variation and not just between study variation as before.  
+#  prior(normal(-0.43,0.1), class = b, coef = DiagnosisTD), # putting the MA prior here - difference between groups 
+#  prior(normal(0, 0.5), class = sigma) # family normal therefore mean of 0. the sd indicate the error that is left after dealing within between partcipant variation. 
+#)
 
 #Running model prior only
 m2_prior <- brm(
