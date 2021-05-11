@@ -209,7 +209,7 @@ m1 <- brm(
   seed = 12, 
   file = "m1", 
   file_refit = "on_change",
-  backend = "cmdstanr"
+  #backend = "cmdstanr"
 )
 
 ### Model quality check 
@@ -311,7 +311,7 @@ m2 <- brm(
   seed = 12, 
   file = "m2", 
   file_refit = "on_change",
-  backend = "cmdstanr"
+  #backend = "cmdstanr"
 )
 
 ### Model quality check
@@ -353,11 +353,11 @@ m2 <- add_criterion(m2, "loo", moment_match = TRUE)
 w_loo <- loo_compare(m1, m2, criterion = "loo")
 
 w_loo
-  #Model 2 seems like the best
+  #Model 1 seems like the best, though pareto k values are too high
 
 #Loo weights 
 loo_model_weights(m1,m2)
-    #Some insecurities about the models 
+    #Model 1 is weighted 1 
 pp_average(m1, m2)
 ```
 
